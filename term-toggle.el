@@ -4,7 +4,7 @@
 ;; Description: Toggle a dedicated terminal per directory
 ;; Author: Joseph <jixiuf@gmail.com>, Yatao <yatao.li@live.com>, Arthur <arthur.miller@live.com>
 ;; Created: 2011-03-02
-;; Version: 3.2.0
+;; Version: 3.2.1
 ;; URL: https://github.com/amno1/emacs-term-toggle
 ;; Keywords: term toggle shell slime
 ;; Compatibility: (Test on GNU Emacs 28.0.50).
@@ -127,7 +127,7 @@ bottom of the frame, the current window the top.  `above', `left'
 and `right' place it on the corresponding side.  The names match
 the SIDE argument of `split-window'."
   :type '(choice (const :tag "Above" above)
-                 (const :tag "Below" below)                 
+                 (const :tag "Below" below)
                  (const :tag "Left" left)
                  (const :tag "Right" right))
   :group 'term-toggle)
@@ -516,22 +516,21 @@ instead of reusing the one already associated with this scope."
 (defun term-toggle-ghostel (&optional arg)
   (interactive "P") (term-toggle 'ghostel arg))
 ;;;###autoload
-(defvar term-toggle-prefix-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "d") #'term-toggle)
-    (define-key map (kbd "a") #'term-toggle-aterm)
-    (define-key map (kbd "t") #'term-toggle-term)
-    (define-key map (kbd "s") #'term-toggle-shell)
-    (define-key map (kbd "e") #'term-toggle-eshell)
-    (define-key map (kbd "i") #'term-toggle-ielm)
-    (define-key map (kbd "v") #'term-toggle-vterm)
-    (define-key map (kbd "g") #'term-toggle-ghostel)
-    (define-key map (kbd "n f") #'term-toggle-cycle-file)
-    (define-key map (kbd "n d") #'term-toggle-cycle-directory)
-    (define-key map (kbd "n p") #'term-toggle-cycle-project)
-    (define-key map (kbd "n g") #'term-toggle-cycle-global)
-    map)
-  "Prefix keymap for `term-toggle' commands.")
+(defvar-keymap term-toggle-prefix-map
+  :prefix t
+  :doc "Prefix keymap for `term-toggle' commands."
+  "d"   #'term-toggle
+  "a"   #'term-toggle-aterm
+  "t"   #'term-toggle-term
+  "s"   #'term-toggle-shell
+  "e"   #'term-toggle-eshell
+  "i"   #'term-toggle-ielm
+  "v"   #'term-toggle-vterm
+  "g"   #'term-toggle-ghostel
+  "n f" #'term-toggle-cycle-file
+  "n d" #'term-toggle-cycle-directory
+  "n p" #'term-toggle-cycle-project
+  "n g" #'term-toggle-cycle-global)
 
 (provide 'term-toggle)
 ;;; term-toggle.el ends here
