@@ -6,7 +6,7 @@
 ;; Version: 1.0.0
 ;; URL: https://github.com/amno1/emacs-term-toggle
 ;; Keywords: helm term toggle shell
-;; Package-Requires: ((emacs "25.1") (helm "3.0") (term-toggle "2.2.0"))
+;; Package-Requires: ((emacs "25.1") (helm "3.0"))
 ;; Compatibility: (Test on GNU Emacs 28.0.50).
 
 ;;; License
