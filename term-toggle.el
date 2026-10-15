@@ -109,16 +109,10 @@ to be installed."
   :type 'boolean
   :group 'term-toggle)
 
-(defcustom term-toggle-minimum-split-height 10
-  "The minimum height of a splittable window."
-  :type 'fixnum
-  :group 'term-toggle)
-
 (defcustom term-toggle-default-height 15
   "The default height of a splitted window."
   :type 'fixnum
   :group 'term-toggle)
-
 
 (defcustom term-toggle-default-width 80
   "Default width of the pop-up when the split is horizontal."
