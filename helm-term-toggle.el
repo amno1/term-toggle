@@ -130,8 +130,12 @@ visible toggle: any other term-toggle window is hidden first."
   (helm :sources helm-source-term-toggle-replace
         :buffer "*helm term-toggle*"))
 
-(global-set-key (kbd "C-z t") #'helm-term-toggle-replace)
-(define-key term-toggle-minor-mode-map (kbd "C-z t") #'helm-term-toggle-replace)
+;;;###autoload
+(defvar helm-term-toggle-prefix-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "t") #'helm-term-toggle)
+    (define-key map (kbd "T") #'helm-term-toggle-replace)
+    map))
 
 (provide 'helm-term-toggle)
 ;;; helm-term-toggle.el ends here

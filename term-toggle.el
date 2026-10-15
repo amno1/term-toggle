@@ -521,19 +521,23 @@ instead of reusing the one already associated with this scope."
 ;;;###autoload
 (defun term-toggle-ghostel (&optional arg)
   (interactive "P") (term-toggle 'ghostel arg))
-
-(global-set-key (kbd "C-c t nf") #'term-toggle-cycle-file)
-(global-set-key (kbd "C-c t nd") #'term-toggle-cycle-directory)
-(global-set-key (kbd "C-c t np") #'term-toggle-cycle-project)
-(global-set-key (kbd "C-c t ng") #'term-toggle-cycle-global)
-(global-set-key (kbd "C-c t d") #'term-toggle)        ; default shell
-(global-set-key (kbd "C-c t a") #'term-toggle-ansi)
-(global-set-key (kbd "C-c t t") #'term-toggle-term)
-(global-set-key (kbd "C-c t s") #'term-toggle-shell)
-(global-set-key (kbd "C-c t e") #'term-toggle-eshell)
-(global-set-key (kbd "C-c t i") #'term-toggle-ielm)
-(global-set-key (kbd "C-c t v") #'term-toggle-vterm)
-(global-set-key (kbd "C-c t g") #'term-toggle-ghostel)
+;;;###autoload
+(defvar term-toggle-prefix-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "d") #'term-toggle)
+    (define-key map (kbd "a") #'term-toggle-aterm)
+    (define-key map (kbd "t") #'term-toggle-term)
+    (define-key map (kbd "s") #'term-toggle-shell)
+    (define-key map (kbd "e") #'term-toggle-eshell)
+    (define-key map (kbd "i") #'term-toggle-ielm)
+    (define-key map (kbd "v") #'term-toggle-vterm)
+    (define-key map (kbd "g") #'term-toggle-ghostel)
+    (define-key map (kbd "n f") #'term-toggle-cycle-file)
+    (define-key map (kbd "n d") #'term-toggle-cycle-directory)
+    (define-key map (kbd "n p") #'term-toggle-cycle-project)
+    (define-key map (kbd "n g") #'term-toggle-cycle-global)
+    map)
+  "Prefix keymap for `term-toggle' commands.")
 
 (provide 'term-toggle)
 ;;; term-toggle.el ends here
