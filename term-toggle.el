@@ -4,7 +4,7 @@
 ;; Description: Toggle a dedicated terminal per directory
 ;; Author: Joseph <jixiuf@gmail.com>, Yatao <yatao.li@live.com>, Arthur <arthur.miller@live.com>
 ;; Created: 2011-03-02
-;; Version: 3.1.0
+;; Version: 3.2.0
 ;; URL: https://github.com/amno1/emacs-term-toggle
 ;; Keywords: term toggle shell slime
 ;; Compatibility: (Test on GNU Emacs 28.0.50).
@@ -74,6 +74,9 @@ to be installed."
 (defcustom term-toggle-scope 'directory
   "Scope of a term-toggle terminal.
 
+`file'       One toggle per visited file (falls back to
+             `directory' for buffers not visiting a file).
+
 `directory'  One toggle per directory (the default).  Each
              subdirectory gets its own terminal.
 
@@ -84,7 +87,8 @@ to be installed."
 `global'     One toggle per shell, shared across every buffer.
              The shell starts in whichever directory was current
              when the toggle was first opened."
-  :type '(choice (const :tag "Per directory" directory)
+  :type '(choice (const :tag "Per file" file)
+                 (const :tag "Per directory" directory)
                  (const :tag "Per project"   project)
                  (const :tag "Global"        global))
   :group 'term-toggle)
@@ -151,6 +155,11 @@ the SIDE argument of `split-window'."
   (or (fboundp 'ghostel)
       (require 'ghostel nil t)))
 
+(defvar-local tt--terminal-scope nil
+  "Value of `term-toggle-scope' when this toggle was created.
+Used by the scope-aware cycle commands to keep the ring inside a
+single scope.")
+
 (defvar-local tt--terminal-key nil
   "Identify a term-toggle terminal buffer.
 When non-nil, a cons of the form (DIR . SHELL) describing which
@@ -174,6 +183,14 @@ Uses `dired-current-directory' in Dired buffers."
          (project-root proj)
        (car (project-root proj))))))
 
+(defun tt--file-key ()
+  "Return a key identifying the current file, or nil.
+Return the file name for a file-visiting buffer, or the
+directory for a Dired buffer."
+  (cond
+   (buffer-file-name (expand-file-name buffer-file-name))
+   ((derived-mode-p 'dired-mode) (tt--directory))))
+
 (defun tt--key ()
   "Return the scope key for the current buffer's toggle.
 
@@ -182,6 +199,7 @@ key and shell share a terminal.  Under `directory' scope it is
 the current directory; under `project' scope it is the project
 root; under `global' scope it is the constant string \"global\"."
   (pcase term-toggle-scope
+    ('file (or (tt--file-key) (tt--directory)))
     ('global "global")
     ('project (or (tt--project-root) (tt--directory)))
     (_ (tt--directory))))
@@ -189,11 +207,15 @@ root; under `global' scope it is the constant string \"global\"."
 (defun tt--shell-dir (key)
   "Return the directory a shell identified by KEY should start in.
 
-Only differs from KEY under `global' scope, where KEY is not a
-directory at all."
-  (if (equal key "global")
-      (tt--directory)
-    key))
+Under `file' scope KEY is a file path, so the shell starts in the
+file's directory.  Under `global' scope KEY is not a path at all,
+so the current directory is used instead.  Otherwise KEY is a
+directory."
+  (cond
+   ((equal key "global") (tt--directory))
+   ((file-directory-p key) key)
+   ((string-match-p "/" key) (file-name-directory key))
+   (t (tt--directory))))
 
 (defun tt--setup-process (buffer)
   "Set up process flags and sentinel for terminal BUFFER."
@@ -253,6 +275,7 @@ directory at all."
       (unless (equal (buffer-name) name)
         (rename-buffer name t))
       (setq-local tt--terminal-key (cons key shell))
+      (setq-local tt--terminal-scope term-toggle-scope)
       (term-toggle-minor-mode 1))
     (tt--setup-process buffer)
     buffer))
@@ -265,19 +288,6 @@ directory at all."
           (with-current-buffer buf
             (equal tt--terminal-key (cons key shell)))))
    (buffer-list)))
-
-(defun tt--get-buffer (shell key)
-  "Return the terminal buffer for SHELL in KEY, creating one if needed."
-  (or (tt--find-buffer shell key)
-      (tt--start shell key)))
-
-;; (defun tt--slime-repl-buffer ()
-;;   "Return the SLIME REPL buffer, starting SLIME if necessary."
-;;   (require 'slime)
-;;   (unless (slime-connected-p)
-;;     (let ((inferior-lisp-program term-toggle-slime-lisp))
-;;       (slime)))
-;;   (slime-repl-buffer))
 
 (defun tt--toggle (buffer)
   "Toggle a pop-up window showing terminal BUFFER.
@@ -327,6 +337,37 @@ visible, it is simply re-selected."
       (select-window win)
     (tt--toggle buffer)))
 
+(defun tt--live-toggles ()
+  "Return all live term-toggle buffers, sorted by buffer name."
+  (sort (seq-filter
+         (lambda (buf)
+           (and (buffer-live-p buf)
+                (with-current-buffer buf tt--terminal-key)))
+         (buffer-list))
+        (lambda (a b)
+          (string< (buffer-name a) (buffer-name b)))))
+
+(defun tt--scope-key (scope)
+  "Return the toggle key for the current context under SCOPE.
+
+Inside a toggle that was itself created under SCOPE, return that
+toggle's own key so the ring stays anchored to it; otherwise
+compute the key the way `tt--key' would for SCOPE."
+  (if (and tt--terminal-key
+           (eq tt--terminal-scope scope))
+      (car tt--terminal-key)
+    (let ((term-toggle-scope scope))
+      (tt--key))))
+
+(defun tt--scope-toggles (scope)
+  "Return live toggles created under SCOPE for the current context."
+  (let ((key (tt--scope-key scope)))
+    (seq-filter
+     (lambda (buf)
+       (with-current-buffer buf
+         (and (eq tt--terminal-scope scope)
+              (equal (car tt--terminal-key) key))))
+     (tt--live-toggles))))
 
 ;;; Minor mode
 
@@ -362,29 +403,23 @@ re-selecting the current toggle's window."
   (if replace
       (tt--replace (current-buffer))
     (tt--toggle (current-buffer))))
-
-;;; Commands
 
-;;;###autoload
-(defun term-toggle-cycle (&optional backward)
-  "Cycle through all live term-toggle buffers.
+(defun tt--get-buffer (shell key &optional new)
+  "Return the terminal buffer for SHELL in KEY.
 
-With no argument, show the next toggle in alphabetical order.  With
-a non-nil BACKWARD argument, show the previous one instead.
+When NEW is non-nil, always start a fresh terminal instead of
+reusing the one already associated with SHELL and KEY."
+  (or (and (not new) (tt--find-buffer shell key))
+      (tt--start shell key)))
 
-If a toggle is currently displayed it is hidden first, so a cycle
-effectively swaps one toggle for another.  Buffers are visited in
-alphabetical order by buffer name, so the ring is stable across
-invocations."
-  (interactive "P")
-  (let* ((buffers (sort (seq-filter
-                         (lambda (buf)
-                           (and (buffer-live-p buf)
-                                (with-current-buffer buf tt--terminal-key)))
-                         (buffer-list))
-                        (lambda (a b)
-                          (string< (buffer-name a) (buffer-name b)))))
-         (n (length buffers))
+(defun tt--cycle-buffers (buffers &optional backward)
+  "Cycle through BUFFERS, hiding the currently visible one first.
+
+BUFFERS is expected to be sorted by buffer name.  With BACKWARD,
+step to the previous buffer instead of the next."
+  (unless buffers
+    (user-error "No matching term-toggle buffers"))
+  (let* ((n (length buffers))
          (current (seq-find #'get-buffer-window buffers))
          (next (cond
                 ((null current)
@@ -393,83 +428,112 @@ invocations."
                  (nth (mod (1- (seq-position buffers current)) n) buffers))
                 (t
                  (nth (mod (1+ (seq-position buffers current)) n) buffers)))))
-    (unless buffers
-      (user-error "No term-toggle buffers"))
-    (when current
-      (tt--toggle current))
-    (unless (eq current next)
-      (tt--toggle next))))
+    (when current (tt--toggle current))
+    (unless (eq current next) (tt--toggle next))))
+
+
+;;; Commands
+
+;;;###autoload
+(defun term-toggle-cycle (&optional backward)
+  "Cycle through all live term-toggle buffers.
+
+With no argument, show the next toggle in alphabetical order.  With
+a non-nil BACKWARD argument, show the previous one instead."
+  (interactive "P")
+  (tt--cycle-buffers (tt--live-toggles) backward))
 
 ;;;###autoload
 (defun term-toggle-cycle-backward ()
   "Cycle through term-toggle buffers in reverse order."
   (interactive)
   (term-toggle-cycle t))
+
 ;;;###autoload
-(defun term-toggle (&optional shell)
+(defun term-toggle-cycle-file (&optional backward)
+  "Cycle through toggles for the current file.
+
+Only toggles created under `file' scope for the same file are
+considered.  With a prefix argument, cycle backwards."
+  (interactive "P")
+  (tt--cycle-buffers (tt--scope-toggles 'file) backward))
+
+;;;###autoload
+(defun term-toggle-cycle-directory (&optional backward)
+  "Cycle through toggles for the current directory.
+
+Only toggles created under `directory' scope for the same
+directory are considered.  With a prefix argument, cycle backwards."
+  (interactive "P")
+  (tt--cycle-buffers (tt--scope-toggles 'directory) backward))
+
+;;;###autoload
+(defun term-toggle-cycle-project (&optional backward)
+  "Cycle through toggles for the current project.
+
+Only toggles created under `project' scope for the same project
+root are considered.  With a prefix argument, cycle backwards."
+  (interactive "P")
+  (tt--cycle-buffers (tt--scope-toggles 'project) backward))
+
+;;;###autoload
+(defun term-toggle-cycle-global (&optional backward)
+  "Cycle through every toggle created under `global' scope.
+
+With a prefix argument, cycle backwards."
+  (interactive "P")
+  (tt--cycle-buffers (tt--scope-toggles 'global) backward))
+
+(defun term-toggle (&optional shell arg)
   "Toggle a terminal for the current scope.
 
 The scope is determined by `term-toggle-scope': one toggle per
 directory, per project, or shared globally.  With no argument,
-use `term-toggle-default-shell'."
-  (interactive)
+use `term-toggle-default-shell'.
+
+Interactively, a prefix argument asks for a brand-new terminal
+instead of reusing the one already associated with this scope."
+  (interactive "p")
+  (when (integerp shell)          ; prefix arrives in SHELL
+    (setq arg shell shell nil))
   (let* ((shell (or shell term-toggle-default-shell))
          (key (tt--key)))
-    (tt--toggle (tt--get-buffer shell key))))
+    (tt--toggle (tt--get-buffer shell key arg))))
 
 ;;;###autoload
-(defun term-toggle-ansi ()
-  "Toggle an `ansi-term' terminal for the current directory."
-  (interactive)
-  (term-toggle 'ansi-term))
-
+(defun term-toggle-term    (&optional arg)
+  (interactive "P") (term-toggle 'term arg))
 ;;;###autoload
-(defun term-toggle-term ()
-  "Toggle a `term' terminal for the current directory."
-  (interactive)
-  (term-toggle 'term))
-
+(defun term-toggle-aterm    (&optional arg)
+  (interactive "P") (term-toggle 'ansi-term arg))
 ;;;###autoload
-(defun term-toggle-shell ()
-  "Toggle a `shell' terminal for the current directory."
-  (interactive)
-  (term-toggle 'shell))
-
+(defun term-toggle-shell   (&optional arg)
+  (interactive "P") (term-toggle 'shell arg))
 ;;;###autoload
-(defun term-toggle-eshell ()
-  "Toggle an `eshell' terminal for the current directory."
-  (interactive)
-  (term-toggle 'eshell))
-
+(defun term-toggle-eshell  (&optional arg)
+  (interactive "P") (term-toggle 'eshell arg))
 ;;;###autoload
-(defun term-toggle-ielm ()
-  "Toggle an `ielm' terminal for the current directory."
-  (interactive)
-  (term-toggle 'ielm))
-
+(defun term-toggle-ielm    (&optional arg)
+  (interactive "P") (term-toggle 'ielm arg))
 ;;;###autoload
-(defun term-toggle-vterm ()
-  "Toggle a libvterm terminal for the current directory.
-
-Requires the optional vterm package to be installed."
-  (interactive)
-  (term-toggle 'vterm))
-
+(defun term-toggle-vterm   (&optional arg)
+  (interactive "P") (term-toggle 'vterm arg))
 ;;;###autoload
-(defun term-toggle-ghostel ()
-  "Toggle a Ghostel terminal for the current directory.
+(defun term-toggle-ghostel (&optional arg)
+  (interactive "P") (term-toggle 'ghostel arg))
 
-Requires the optional ghostel package to be installed."
-  (interactive)
-  (term-toggle 'ghostel))
-
-;; ;;;###autoload
-;; (defun term-toggle-slime ()
-;;   "Toggle a SLIME REPL, starting SBCL-backed SLIME if necessary.
-;; SLIME keeps a single REPL buffer per connection, so unlike the
-;; shell terminals this command is not directory-scoped."
-;;   (interactive)
-;;   (tt--toggle (tt--slime-repl-buffer)))
+(global-set-key (kbd "C-c t nf") #'term-toggle-cycle-file)
+(global-set-key (kbd "C-c t nd") #'term-toggle-cycle-directory)
+(global-set-key (kbd "C-c t np") #'term-toggle-cycle-project)
+(global-set-key (kbd "C-c t ng") #'term-toggle-cycle-global)
+(global-set-key (kbd "C-c t d") #'term-toggle)        ; default shell
+(global-set-key (kbd "C-c t a") #'term-toggle-ansi)
+(global-set-key (kbd "C-c t t") #'term-toggle-term)
+(global-set-key (kbd "C-c t s") #'term-toggle-shell)
+(global-set-key (kbd "C-c t e") #'term-toggle-eshell)
+(global-set-key (kbd "C-c t i") #'term-toggle-ielm)
+(global-set-key (kbd "C-c t v") #'term-toggle-vterm)
+(global-set-key (kbd "C-c t g") #'term-toggle-ghostel)
 
 (provide 'term-toggle)
 ;;; term-toggle.el ends here
